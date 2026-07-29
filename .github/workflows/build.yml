@@ -1,4 +1,4 @@
-name: build-flame-fart
+name: build-redfin-fart
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
       aosp_tag:
         description: "AOSP tag to build"
         required: false
-        default: "android-12.0.0_r32"
+        default: "android-12.1.0_r2"
 
 permissions:
   contents: write
@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 240
     env:
-      AOSP_TAG: ${{ inputs.aosp_tag || 'android-12.0.0_r32' }}
+      AOSP_TAG: ${{ inputs.aosp_tag || 'android-12.1.0_r2' }}
     steps:
       - name: Free disk space
         run: |
@@ -62,27 +62,13 @@ jobs:
         run: |
           repo sync -c -j$(nproc) --no-tags --no-clone-bundle
 
-      - name: Compress AOSP source
-        working-directory: aosp
-        run: |
-          tar --exclude='.repo/projects' --exclude='.repo/project-objects' \
-              --exclude='out' --exclude='ccache' \
-              -czf ../aosp-source.tar.gz .
-          ls -lh ../aosp-source.tar.gz
-
-      - name: Upload AOSP source artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: aosp-source
-          path: aosp-source.tar.gz
-          if-no-files-found: error
-          retention-days: 7
-
   build:
     name: "2/3 - apply patches + m"
     needs: sync
     runs-on: ubuntu-22.04
     timeout-minutes: 480
+    env:
+      AOSP_TAG: ${{ inputs.aosp_tag || 'android-12.1.0_r2' }}
     steps:
       - name: Free disk space
         run: |
@@ -103,26 +89,31 @@ jobs:
           sudo swapon --show
           free -h
 
-      - name: Install build deps
+      - name: Install build deps + repo tool
         run: |
           sudo apt-get update
           sudo apt-get install -y git-core gnupg flex bison build-essential zip \
             curl zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 \
             libncurses5-dev x11proto-core-dev libx11-dev lib32z1-dev \
             libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig ccache \
-            python3 python-is-python3
+            python3 python-is-python3 repo
 
-      - name: Download AOSP source artifact
-        uses: actions/download-artifact@v4
+      - name: Checkout repo (submodule access)
+        uses: actions/checkout@v4
         with:
-          name: aosp-source
-          path: aosp-source.tar.gz
+          submodules: recursive
 
-      - name: Extract AOSP source
+      - name: Verify fart12-lite submodule present
         run: |
-          mkdir -p aosp
-          tar -xzf aosp-source.tar.gz -C aosp
-          ls aosp | head
+          ls fart12-lite/art/runtime/art_method.cc
+          ls fart12-lite/frameworks/base/core/java/cn/zskkk/FFaarrtt.java
+          ls fart12-lite/libcore/dalvik/src/main/java/dalvik/system/DexFile.java
+
+      - name: Re-sync AOSP tree (independent from sync job)
+        working-directory: aosp
+        run: |
+          repo init -u https://android.googlesource.com/platform/manifest -b ${AOSP_TAG:-android-12.1.0_r2} --depth=1
+          repo sync -c -j$(nproc) --no-tags --no-clone-bundle
 
       - name: Restore ccache
         uses: actions/cache@v4
@@ -132,23 +123,15 @@ jobs:
           restore-keys: |
             ccache-
 
-      - name: Checkout repo (submodule access)
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Apply fart12-lite patches
+      - name: Copy fart12-lite files into AOSP tree
         working-directory: aosp
         run: |
           set -e
-          git apply -v ../fart12-lite/art/*.patch 2>/dev/null || true
-          git apply -v ../fart12-lite/frameworks/*.patch 2>/dev/null || true
-          git apply -v ../fart12-lite/libcore/*.patch 2>/dev/null || true
+          cp -rv ../fart12-lite/art/* art/
+          cp -rv ../fart12-lite/frameworks/* frameworks/
+          cp -rv ../fart12-lite/libcore/* libcore/
 
-          # fart12-lite ships full files, not patches — fall back to cp
-          cp -rv ../fart12-lite/art/* art/ || true
-          cp -rv ../fart12-lite/frameworks/* frameworks/ || true
-          cp -rv ../fart12-lite/libcore/* libcore/ || true
+          ls frameworks/base/core/java/cn/zskkk/
 
       - name: Patch boot-jar allowlist
         working-directory: aosp
@@ -166,16 +149,17 @@ jobs:
         working-directory: aosp
         run: |
           source build/envsetup.sh
-          lunch aosp_flame-userdebug
-          echo "TARGET_PRODUCT=$TARGET_PRODUCT" >> $GITHUB_ENV
-          echo "TARGET_BUILD_VARIANT=$TARGET_BUILD_VARIANT" >> $GITHUB_ENV
+          lunch aosp_redfin-userdebug
+          echo "lunch complete: TARGET_PRODUCT=${TARGET_PRODUCT} TARGET_BUILD_VARIANT=${TARGET_BUILD_VARIANT}"
 
       - name: Build system.img + boot.img + vbmeta.img
         working-directory: aosp
         run: |
           source build/envsetup.sh
+          lunch aosp_redfin-userdebug
           set -o pipefail
-          m -j$(nproc) system.img boot.img vbmeta.img 2>&1 | tee build.log | tail -200
+          m -j$(nproc) system.img boot.img vbmeta.img 2>&1 | tee build.log
+          echo "build exit: ${PIPESTATUS[0]}"
 
       - name: Save ccache for next run
         if: always()
@@ -199,9 +183,9 @@ jobs:
         with:
           name: aosp-images
           path: |
-            aosp/out/target/product/flame/boot.img
-            aosp/out/target/product/flame/system.img
-            aosp/out/target/product/flame/vbmeta.img
+            aosp/out/target/product/redfin/boot.img
+            aosp/out/target/product/redfin/system.img
+            aosp/out/target/product/redfin/vbmeta.img
           if-no-files-found: error
           retention-days: 7
 
@@ -232,18 +216,21 @@ jobs:
       - name: Install unzip
         run: sudo apt-get install -y unzip
 
-      - name: Download flame factory image
+      - name: Download redfin factory image
         run: |
           set -e
-          FACTORY_URL="https://dl.google.com/dl/android/aosp/flame-sp1a.210812.016-factory-8bf4b5d4.zip"
+          FACTORY_URL="https://dl.google.com/dl/android/aosp/redfin-sq1a.220205.002-factory-734556ab.zip"
           curl -L --fail -o factory.zip "${FACTORY_URL}"
           ls -lh factory.zip
           unzip -q factory.zip -d factory
           ls factory/
-          unzip -q factory/image-flame-sp1a.210812.016.zip -d factory/extracted
-          cp factory/extracted/vendor-flame-*.img .
-          cp factory/extracted/bootloader-flame-*.img .
-          cp factory/extracted/radio-flame-*.img 2>/dev/null || echo "no radio img (OK for flame)"
+          # discover the inner image zip name dynamically
+          INNER_ZIP=$(ls factory/image-redfin-sq1a.220205.002-*.zip | head -1)
+          echo "INNER_ZIP=${INNER_ZIP}"
+          unzip -q "${INNER_ZIP}" -d factory/extracted
+          cp factory/extracted/vendor-redfin-*.img .
+          cp factory/extracted/bootloader-redfin-*.img .
+          cp factory/extracted/radio-redfin-*.img 2>/dev/null || echo "no radio img (OK for redfin)"
           ls *.img
 
       - name: Stage bundle
@@ -252,9 +239,9 @@ jobs:
           cp images/boot.img bundle/
           cp images/system.img bundle/
           cp images/vbmeta.img bundle/
-          cp vendor-flame-*.img bundle/
-          cp bootloader-flame-*.img bundle/
-          cp radio-flame-*.img bundle/ 2>/dev/null || true
+          cp vendor-redfin-*.img bundle/
+          cp bootloader-redfin-*.img bundle/
+          cp radio-redfin-*.img bundle/ 2>/dev/null || true
           cp f1rt.config bundle/
 
       - name: Generate flash-all.sh
@@ -277,29 +264,29 @@ jobs:
         run: |
           cp build.log build.log 2>/dev/null || echo "no build log"
           cd bundle
-          zip -r ../flame-fart-${GITHUB_SHA::7}.zip .
+          zip -r ../redfin-fart-${GITHUB_SHA::7}.zip .
           cd ..
-          ls -lh flame-fart-*.zip
+          ls -lh redfin-fart-*.zip
 
       - name: Upload final bundle
         uses: actions/upload-artifact@v4
         with:
-          name: flame-fart-bundle
-          path: flame-fart-${GITHUB_SHA::7}.zip
+          name: redfin-fart-bundle
+          path: redfin-fart-${GITHUB_SHA::7}.zip
           if-no-files-found: error
           retention-days: 30
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: flame-fart-${{ github.sha }}
-          name: "Flame FART12 build ${{ github.sha }}"
+          tag_name: redfin-fart-${{ github.sha }}
+          name: "Redfin FART12 build ${{ github.sha }}"
           body: |
-            AOSP 12.0.0_r32 userdebug image for Pixel 4 (flame) with fart12-lite patches.
+            AOSP 12.1.0_r4 userdebug image for Pixel 5 (redfin) with fart12-lite patches.
             Targets com.sacombankpay for DexProtector dump extraction.
             Build SHA: ${{ github.sha }}
             Build date: ${{ github.run_id }}
-          files: flame-fart-${{ github.sha }}.zip
+          files: redfin-fart-${{ github.sha }}.zip
           draft: false
           prerelease: false
           fail_on_unmatched_files: true

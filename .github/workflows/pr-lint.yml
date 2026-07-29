@@ -6,10 +6,11 @@ on:
       - 'fart12-lite/**'
       - 'f1rt.config'
       - '.github/workflows/build.yml'
+      - 'flash-all.sh.template'
 
 jobs:
-  apply-check:
-    name: "verify patches apply against r32 tree"
+  sanity-check:
+    name: "verify fart12-lite payload integrity"
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
@@ -18,44 +19,61 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
           sudo apt-get clean
 
-      - name: Install repo tool
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y repo git curl
-          mkdir -p ~/.bin
-          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/.bin/repo
-          chmod a+rx ~/.bin/repo
-          echo "$HOME/.bin" >> $GITHUB_PATH
-
       - name: Checkout PR
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Sparse sync art/frameworks/libcore
-        working-directory: aosp
-        run: |
-          repo init -u https://android.googlesource.com/platform/manifest -b android-12.0.0_r32 --depth=1
-          repo sync -c -j$(nproc) --no-tags --no-clone-bundle \
-            art frameworks/base libcore build
-
-      - name: git apply --check
-        working-directory: aosp
+      - name: Verify expected fart12-lite files exist
         run: |
           set -e
-          for p in ../fart12-lite/art/*.patch; do
-            [ -f "$p" ] || continue
-            echo "checking $p"
-            git apply --check "$p" || { echo "FAILED: $p"; exit 1; }
-          done
-          for p in ../fart12-lite/frameworks/*.patch; do
-            [ -f "$p" ] || continue
-            echo "checking $p"
-            git apply --check "$p" || { echo "FAILED: $p"; exit 1; }
-          done
-          for p in ../fart12-lite/libcore/*.patch; do
-            [ -f "$p" ] || continue
-            echo "checking $p"
-            git apply --check "$p" || { echo "FAILED: $p"; exit 1; }
-          done
-          echo "all patches apply cleanly"
+          test -f fart12-lite/art/runtime/art_method.cc \
+            || { echo "MISSING: art/runtime/art_method.cc"; exit 1; }
+          test -f fart12-lite/art/runtime/art_method.h \
+            || { echo "MISSING: art/runtime/art_method.h"; exit 1; }
+          test -f fart12-lite/art/runtime/Android.bp \
+            || { echo "MISSING: art/runtime/Android.bp"; exit 1; }
+          test -f fart12-lite/art/runtime/interpreter/interpreter.cc \
+            || { echo "MISSING: interpreter.cc"; exit 1; }
+          test -f fart12-lite/art/runtime/interpreter/interpreter_switch_impl-inl.h \
+            || { echo "MISSING: interpreter_switch_impl-inl.h"; exit 1; }
+          test -f fart12-lite/art/runtime/native/dalvik_system_DexFile.cc \
+            || { echo "MISSING: dalvik_system_DexFile.cc"; exit 1; }
+          test -f fart12-lite/art/runtime/native/java_lang_reflect_Method.cc \
+            || { echo "MISSING: java_lang_reflect_Method.cc"; exit 1; }
+          test -f fart12-lite/art/dex2oat/dex2oat.cc \
+            || { echo "MISSING: dex2oat.cc"; exit 1; }
+          test -f fart12-lite/frameworks/base/core/java/cn/zskkk/FFaarrtt.java \
+            || { echo "MISSING: FFaarrtt.java"; exit 1; }
+          test -f fart12-lite/frameworks/base/core/java/cn/zskkk/PackageItem.java \
+            || { echo "MISSING: PackageItem.java"; exit 1; }
+          test -f fart12-lite/frameworks/base/core/java/android/app/ActivityThread.java \
+            || { echo "MISSING: ActivityThread.java"; exit 1; }
+          test -f fart12-lite/libcore/dalvik/src/main/java/dalvik/system/DexFile.java \
+            || { echo "MISSING: DexFile.java"; exit 1; }
+          echo "OK: all expected fart12-lite files present"
+
+      - name: Validate f1rt.config JSON
+        run: |
+          python3 -c "import json; c=json.load(open('f1rt.config')); assert c.get('enabled') is True; assert c.get('packageName'); print('OK: f1rt.config valid')"
+
+      - name: Validate flash-all.sh.template syntax
+        run: |
+          bash -n flash-all.sh.template && echo "OK: flash-all.sh.template parses"
+
+  yaml-lint:
+    name: "yaml syntax check"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+
+      - name: Install yamllint
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y yamllint
+
+      - name: Lint workflow YAML
+        run: |
+          yamllint -d "{extends: default, rules: {line-length: disable, document-start: disable, truthy: disable, new-line-at-end-of-file: disable}}" .github/workflows/

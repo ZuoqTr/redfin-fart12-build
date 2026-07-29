@@ -1,6 +1,6 @@
-# flame-fart12-build
+# redfin-fart12-build
 
-Builds a `userdebug` AOSP 12 image for **Pixel 4 (flame)** with **fart12-lite** patches
+Builds a `userdebug` AOSP 12 image for **Pixel 5 (redfin)** with **fart12-lite** patches
 integrated, targets `com.sacombankpay` for DexProtector dump extraction.
 
 ## What you get
@@ -8,13 +8,13 @@ integrated, targets `com.sacombankpay` for DexProtector dump extraction.
 GitHub Release artifact per run:
 
 ```
-flame-fart-<sha>.zip
+redfin-fart-<sha>.zip
 ├── boot.img                  (AOSP build with FART)
 ├── system.img                (AOSP build with FART)
 ├── vbmeta.img                (AVB chain)
-├── vendor-flame-*.img        (factory blob)
-├── bootloader-flame-*.img    (factory blob)
-├── radio-flame-*.img         (factory blob)
+├── vendor-redfin-*.img       (factory blob)
+├── bootloader-redfin-*.img   (factory blob)
+├── radio-redfin-*.img        (factory blob)
 ├── f1rt.config               (Sacombank config)
 ├── flash-all.sh              (one-shot flash wrapper)
 └── build.log                 (full m output)
@@ -23,8 +23,8 @@ flame-fart-<sha>.zip
 ## Flash procedure
 
 ```bash
-unzip flame-fart-<sha>.zip -d flame-fart
-cd flame-fart
+unzip redfin-fart-<sha>.zip -d redfin-fart
+cd redfin-fart
 # device in fastboot mode
 ./flash-all.sh
 ```
@@ -48,22 +48,25 @@ Three-job GitHub Actions workflow:
 
 | Job | Purpose | Wall-clock |
 |---|---|---|
-| `sync` | `repo init` against `android-12.0.0_r32`, sync AOSP tree, cache `.repo` archive | 30-60 min |
-| `build` | Apply FART patches, `lunch aosp_flame-userdebug`, `m system.img boot.img vbmeta.img` | 3-5 hr |
-| `assemble` | Download flame factory blob, build `flash-all.sh`, upload to GitHub Release | 5-10 min |
+| `sync` | `repo init` against `android-12.1.0_r2`, sync AOSP tree | 30-60 min |
+| `build` | Apply FART patches, `lunch aosp_redfin-userdebug`, `m system.img boot.img vbmeta.img` | 3-5 hr |
+| `assemble` | Download redfin factory blob, build `flash-all.sh`, upload to GitHub Release | 5-10 min |
+
+Build and sync jobs both run `repo sync` independently (AOSP source too large to fit
+in 2GB artifact cap).
 
 ## Trigger
 
 `workflow_dispatch` only. Manual run from Actions tab. Inputs:
 
-- `aosp_tag` — default `android-12.0.0_r32`
+- `aosp_tag` — default `android-12.1.0_r2`
 
 ## Local submodule
 
 Pinned to `Zskkk/fart12-lite` commit `7671fe3b95d28162e1b2024262ddf4fd8fe4077b`.
 
 ```bash
-git clone --recurse-submodules https://github.com/ZuoqTr/flame-fart12-build.git
+git clone --recurse-submodules https://github.com/ZuoqTr/redfin-fart12-build.git
 ```
 
 To bump the pin:
@@ -76,7 +79,7 @@ git add fart12-lite && git commit -m "bump fart12-lite pin"
 ## Files
 
 - `.github/workflows/build.yml` — 3-job pipeline
-- `.github/workflows/pr-lint.yml` — `git apply --check` on PRs
+- `.github/workflows/pr-lint.yml` — payload + JSON + YAML validation
 - `f1rt.config` — Sacombank dump config (`isDeep: true`)
 - `flash-all.sh.template` — substituted at build time
 - `fart12-lite/` — submodule (pinned upstream)

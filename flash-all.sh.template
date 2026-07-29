@@ -6,11 +6,11 @@ BUILD_TAG="__BUILD_TAG__"
 BUILD_DATE="__BUILD_DATE__"
 
 echo "=========================================="
-echo " Flame FART12 build: ${BUILD_TAG}"
+echo " Redfin FART12 build: ${BUILD_TAG}"
 echo " Build date: ${BUILD_DATE}"
 echo "=========================================="
 echo ""
-echo "This script flashes a Pixel 4 (flame) with a userdebug AOSP 12 image"
+echo "This script flashes a Pixel 5 (redfin) with a userdebug AOSP 12 image"
 echo "containing fart12-lite (DexProtector dump support) targeting com.sacombankpay."
 echo ""
 
@@ -26,7 +26,7 @@ if [ -z "${DEVICE}" ]; then
 fi
 
 echo "[1/4] Flashing bootloader + radio..."
-fastboot flash bootloader bootloader-flame-*.img
+fastboot flash bootloader bootloader-redfin-*.img
 fastboot reboot-bootloader
 sleep 2
 
@@ -38,7 +38,7 @@ fastboot flash boot boot.img
 
 echo "[4/4] Flashing system + vendor..."
 fastboot flash system system.img
-fastboot flash vendor vendor-flame-*.img
+fastboot flash vendor vendor-redfin-*.img
 
 echo ""
 echo "=========================================="
