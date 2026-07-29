@@ -53,13 +53,14 @@ jobs:
           submodules: recursive
 
       - name: Initialize repo manifest
-        working-directory: aosp
         run: |
-          repo init -u https://android.googlesource.com/platform/manifest -b ${AOSP_TAG} --depth=1
+          mkdir -p aosp
+          cd aosp
+          repo init -u https://android.googlesource.com/platform/manifest -b "${AOSP_TAG:-android-12.1.0_r2}" --depth=1 -g all,-notdefault
 
       - name: Repo sync
-        working-directory: aosp
         run: |
+          cd aosp
           repo sync -c -j$(nproc) --no-tags --no-clone-bundle
 
   build:
@@ -110,18 +111,19 @@ jobs:
           ls fart12-lite/libcore/dalvik/src/main/java/dalvik/system/DexFile.java
 
       - name: Re-sync AOSP tree (independent from sync job)
-        working-directory: aosp
         run: |
-          repo init -u https://android.googlesource.com/platform/manifest -b ${AOSP_TAG:-android-12.1.0_r2} --depth=1
+          mkdir -p aosp
+          cd aosp
+          repo init -u https://android.googlesource.com/platform/manifest -b "${AOSP_TAG:-android-12.1.0_r2}" --depth=1 -g all,-notdefault
           repo sync -c -j$(nproc) --no-tags --no-clone-bundle
 
       - name: Restore ccache
         uses: actions/cache@v4
         with:
           path: ~/.ccache
-          key: ccache-${{ github.run_id }}
+          key: ccache-redfin-${{ github.sha }}
           restore-keys: |
-            ccache-
+            ccache-redfin-
 
       - name: Copy fart12-lite files into AOSP tree
         working-directory: aosp
@@ -132,6 +134,13 @@ jobs:
           cp -rv ../fart12-lite/libcore/* libcore/
 
           ls frameworks/base/core/java/cn/zskkk/
+
+      - name: Extract redfin vendor blobs
+        working-directory: aosp/device/google/redfin
+        run: |
+          ls self-extractors/ | head
+          ./extract-google_devices.sh
+          ls ../../../vendor/google_devices/redfin/ | head
 
       - name: Patch boot-jar allowlist
         working-directory: aosp
@@ -163,19 +172,10 @@ jobs:
 
       - name: Save ccache for next run
         if: always()
-        run: |
-          ccache -s
-          tar -czf ccache.tar.gz -C ~/.ccache .
-          ls -lh ccache.tar.gz
-
-      - name: Upload ccache artifact
-        if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/cache@v4
         with:
-          name: ccache-${{ github.run_id }}
-          path: ccache.tar.gz
-          if-no-files-found: warn
-          retention-days: 7
+          path: ~/.ccache
+          key: ccache-redfin-${{ github.sha }}
 
       - name: Upload build artifacts
         if: success()
@@ -253,6 +253,7 @@ jobs:
               flash-all.sh.template > bundle/flash-all.sh
           chmod +x bundle/flash-all.sh
           cat bundle/flash-all.sh | head -10
+          echo "BUILD_DATE=${BUILD_DATE}" >> $GITHUB_ENV
 
       - name: Download build log
         uses: actions/download-artifact@v4
@@ -262,7 +263,7 @@ jobs:
 
       - name: Zip bundle
         run: |
-          cp build.log build.log 2>/dev/null || echo "no build log"
+          cp build.log bundle/build.log 2>/dev/null || echo "no build log captured"
           cd bundle
           zip -r ../redfin-fart-${GITHUB_SHA::7}.zip .
           cd ..
@@ -282,10 +283,10 @@ jobs:
           tag_name: redfin-fart-${{ github.sha }}
           name: "Redfin FART12 build ${{ github.sha }}"
           body: |
-            AOSP 12.1.0_r4 userdebug image for Pixel 5 (redfin) with fart12-lite patches.
+            AOSP 12.1.0_r2 userdebug image for Pixel 5 (redfin) with fart12-lite patches.
             Targets com.sacombankpay for DexProtector dump extraction.
             Build SHA: ${{ github.sha }}
-            Build date: ${{ github.run_id }}
+            Build date: ${{ env.BUILD_DATE }}
           files: redfin-fart-${{ github.sha }}.zip
           draft: false
           prerelease: false
