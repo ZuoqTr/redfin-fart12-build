@@ -27,10 +27,15 @@ jobs:
 
       - name: Create swap (8GB)
         run: |
-          sudo fallocate -l 8G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
+          if ! sudo swapon --show | grep -q '/swapfile'; then
+            if [ ! -f /swapfile ]; then
+              sudo fallocate -l 8G /swapfile
+              sudo chmod 600 /swapfile
+              sudo mkswap /swapfile
+            fi
+            sudo swapon /swapfile
+          fi
+          sudo swapon --show
           free -h
 
       - name: Install repo tool
@@ -87,10 +92,15 @@ jobs:
 
       - name: Create swap (8GB)
         run: |
-          sudo fallocate -l 8G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
+          if ! sudo swapon --show | grep -q '/swapfile'; then
+            if [ ! -f /swapfile ]; then
+              sudo fallocate -l 8G /swapfile
+              sudo chmod 600 /swapfile
+              sudo mkswap /swapfile
+            fi
+            sudo swapon /swapfile
+          fi
+          sudo swapon --show
           free -h
 
       - name: Install build deps
