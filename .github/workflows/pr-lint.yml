@@ -1,0 +1,61 @@
+name: pr-lint
+
+on:
+  pull_request:
+    paths:
+      - 'fart12-lite/**'
+      - 'f1rt.config'
+      - '.github/workflows/build.yml'
+
+jobs:
+  apply-check:
+    name: "verify patches apply against r32 tree"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          sudo apt-get clean
+
+      - name: Install repo tool
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y repo git curl
+          mkdir -p ~/.bin
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/.bin/repo
+          chmod a+rx ~/.bin/repo
+          echo "$HOME/.bin" >> $GITHUB_PATH
+
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Sparse sync art/frameworks/libcore
+        working-directory: aosp
+        run: |
+          repo init -u https://android.googlesource.com/platform/manifest -b android-12.0.0_r32 --depth=1
+          repo sync -c -j$(nproc) --no-tags --no-clone-bundle \
+            art frameworks/base libcore build
+
+      - name: git apply --check
+        working-directory: aosp
+        run: |
+          set -e
+          for p in ../fart12-lite/art/*.patch; do
+            [ -f "$p" ] || continue
+            echo "checking $p"
+            git apply --check "$p" || { echo "FAILED: $p"; exit 1; }
+          done
+          for p in ../fart12-lite/frameworks/*.patch; do
+            [ -f "$p" ] || continue
+            echo "checking $p"
+            git apply --check "$p" || { echo "FAILED: $p"; exit 1; }
+          done
+          for p in ../fart12-lite/libcore/*.patch; do
+            [ -f "$p" ] || continue
+            echo "checking $p"
+            git apply --check "$p" || { echo "FAILED: $p"; exit 1; }
+          done
+          echo "all patches apply cleanly"

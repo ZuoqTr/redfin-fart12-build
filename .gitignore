@@ -1,0 +1,21 @@
+# Build output
+out/
+.ccache/
+*.log
+build/
+
+# Secrets
+*.env
+.env
+
+# AOSP source (if synced locally)
+aosp/
+
+# Bundles
+flame-fart-*.zip
+bundle/
+factory/
+images/
+*.img
+*.tar.gz
+*.tar
