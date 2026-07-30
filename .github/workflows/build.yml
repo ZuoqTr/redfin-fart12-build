@@ -160,7 +160,7 @@ jobs:
           source build/envsetup.sh
           lunch aosp_redfin-userdebug
           set -o pipefail
-          m -j$(nproc) boot.img 2>&1 | tee build.log
+          m -j$(nproc) bootimage 2>&1 | tee build.log
           echo "build exit: ${PIPESTATUS[0]}"
 
       - name: Save ccache for next run
