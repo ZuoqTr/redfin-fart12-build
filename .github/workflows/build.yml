@@ -117,13 +117,15 @@ jobs:
           repo init -u https://android.googlesource.com/platform/manifest -b "${AOSP_TAG:-android-12.1.0_r2}" --depth=1 -g all,-notdefault
           repo sync -c -j$(nproc) --no-tags --no-clone-bundle
 
-      - name: Restore ccache
+      - name: Restore ccache + soong bootstrap
         uses: actions/cache@v4
         with:
-          path: ~/.ccache
-          key: ccache-redfin-${{ github.sha }}
+          path: |
+            ~/.ccache
+            aosp/out/soong/.bootstrap
+          key: build-redfin-${{ github.sha }}
           restore-keys: |
-            ccache-redfin-
+            build-redfin-
 
       - name: Copy fart12-lite files into AOSP tree
         run: |
@@ -163,12 +165,14 @@ jobs:
           m -j$(nproc) bootimage 2>&1 | tee build.log
           echo "build exit: ${PIPESTATUS[0]}"
 
-      - name: Save ccache for next run
+      - name: Save ccache + soong bootstrap for next run
         if: always()
         uses: actions/cache@v4
         with:
-          path: ~/.ccache
-          key: ccache-redfin-${{ github.sha }}
+          path: |
+            ~/.ccache
+            aosp/out/soong/.bootstrap
+          key: build-redfin-${{ github.sha }}
 
       - name: Upload boot image
         if: success()
