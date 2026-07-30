@@ -64,7 +64,7 @@ jobs:
           repo sync -c -j$(nproc) --no-tags --no-clone-bundle
 
   build:
-    name: "2/3 - apply patches + m"
+    name: "2/3 - build boot.img (boot + ART only)"
     needs: sync
     runs-on: ubuntu-22.04
     timeout-minutes: 480
@@ -126,8 +126,8 @@ jobs:
             ccache-redfin-
 
       - name: Copy fart12-lite files into AOSP tree
-        working-directory: aosp
         run: |
+          cd aosp
           set -e
           cp -rv ../fart12-lite/art/* art/
           cp -rv ../fart12-lite/frameworks/* frameworks/
@@ -135,16 +135,9 @@ jobs:
 
           ls frameworks/base/core/java/cn/zskkk/
 
-      - name: Extract redfin vendor blobs
-        working-directory: aosp/device/google/redfin
-        run: |
-          ls self-extractors/ | head
-          ./extract-google_devices.sh
-          ls ../../../vendor/google_devices/redfin/ | head
-
       - name: Patch boot-jar allowlist
-        working-directory: aosp
         run: |
+          cd aosp
           echo 'cn\.zskkk' >> build/soong/scripts/check_boot_jars/package_allowed_list.txt
           tail -3 build/soong/scripts/check_boot_jars/package_allowed_list.txt
 
@@ -155,19 +148,19 @@ jobs:
           ccache -M 5G
 
       - name: Source build env
-        working-directory: aosp
         run: |
+          cd aosp
           source build/envsetup.sh
           lunch aosp_redfin-userdebug
           echo "lunch complete: TARGET_PRODUCT=${TARGET_PRODUCT} TARGET_BUILD_VARIANT=${TARGET_BUILD_VARIANT}"
 
-      - name: Build system.img + boot.img + vbmeta.img
-        working-directory: aosp
+      - name: Build boot.img (ART + kernel + ramdisk)
         run: |
+          cd aosp
           source build/envsetup.sh
           lunch aosp_redfin-userdebug
           set -o pipefail
-          m -j$(nproc) system.img boot.img vbmeta.img 2>&1 | tee build.log
+          m -j$(nproc) boot.img 2>&1 | tee build.log
           echo "build exit: ${PIPESTATUS[0]}"
 
       - name: Save ccache for next run
@@ -177,15 +170,12 @@ jobs:
           path: ~/.ccache
           key: ccache-redfin-${{ github.sha }}
 
-      - name: Upload build artifacts
+      - name: Upload boot image
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: aosp-images
-          path: |
-            aosp/out/target/product/redfin/boot.img
-            aosp/out/target/product/redfin/system.img
-            aosp/out/target/product/redfin/vbmeta.img
+          name: boot-image
+          path: aosp/out/target/product/redfin/boot.img
           if-no-files-found: error
           retention-days: 7
 
@@ -199,15 +189,15 @@ jobs:
           retention-days: 30
 
   assemble:
-    name: "3/3 - assemble flashable bundle"
+    name: "3/3 - assemble flashable bundle (factory + custom boot)"
     needs: build
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
-      - name: Download AOSP images
+      - name: Download boot image
         uses: actions/download-artifact@v4
         with:
-          name: aosp-images
+          name: boot-image
           path: images
 
       - name: Checkout repo (for templates + f1rt.config)
@@ -224,11 +214,11 @@ jobs:
           ls -lh factory.zip
           unzip -q factory.zip -d factory
           ls factory/
-          # discover the inner image zip name dynamically
           INNER_ZIP=$(ls factory/image-redfin-sq1a.220205.002-*.zip | head -1)
           echo "INNER_ZIP=${INNER_ZIP}"
           unzip -q "${INNER_ZIP}" -d factory/extracted
-          cp factory/extracted/vendor-redfin-*.img .
+          cp factory/extracted/system.img .
+          cp factory/extracted/vendor.img .
           cp factory/extracted/bootloader-redfin-*.img .
           cp factory/extracted/radio-redfin-*.img 2>/dev/null || echo "no radio img (OK for redfin)"
           ls *.img
@@ -236,10 +226,9 @@ jobs:
       - name: Stage bundle
         run: |
           mkdir -p bundle
-          cp images/boot.img bundle/
-          cp images/system.img bundle/
-          cp images/vbmeta.img bundle/
-          cp vendor-redfin-*.img bundle/
+          cp images/boot.img bundle/boot-aosp-fart.img
+          cp system.img bundle/
+          cp vendor.img bundle/
           cp bootloader-redfin-*.img bundle/
           cp radio-redfin-*.img bundle/ 2>/dev/null || true
           cp f1rt.config bundle/
@@ -283,7 +272,8 @@ jobs:
           tag_name: redfin-fart-${{ github.sha }}
           name: "Redfin FART12 build ${{ github.sha }}"
           body: |
-            AOSP 12.1.0_r2 userdebug image for Pixel 5 (redfin) with fart12-lite patches.
+            AOSP 12.1.0_r2 userdebug boot.img with fart12-lite patches for Pixel 5 (redfin).
+            Bundle: custom boot.img + factory system.img + vendor.img + bootloader.img + radio.img.
             Targets com.sacombankpay for DexProtector dump extraction.
             Build SHA: ${{ github.sha }}
             Build date: ${{ env.BUILD_DATE }}

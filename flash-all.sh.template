@@ -10,8 +10,13 @@ echo " Redfin FART12 build: ${BUILD_TAG}"
 echo " Build date: ${BUILD_DATE}"
 echo "=========================================="
 echo ""
-echo "This script flashes a Pixel 5 (redfin) with a userdebug AOSP 12 image"
-echo "containing fart12-lite (DexProtector dump support) targeting com.sacombankpay."
+echo "This script flashes a Pixel 5 (redfin) with factory images + a custom"
+echo "boot.img containing fart12-lite (ART-based DexProtector dump support)"
+echo "targeting com.sacombankpay."
+echo ""
+echo "boot.img was built from AOSP 12.1.0_r2 with fart12-lite patches."
+echo "system.img, vendor.img, bootloader.img, radio.img come from the official"
+echo "Google factory image and are unmodified."
 echo ""
 
 if ! command -v fastboot >/dev/null 2>&1; then
@@ -25,20 +30,22 @@ if [ -z "${DEVICE}" ]; then
   exit 1
 fi
 
-echo "[1/4] Flashing bootloader + radio..."
+echo "[1/5] Flashing bootloader..."
 fastboot flash bootloader bootloader-redfin-*.img
 fastboot reboot-bootloader
 sleep 2
 
-echo "[2/4] Flashing vbmeta (disable-verity)..."
-fastboot --disable-verity --disable-verification flash vbmeta vbmeta.img
+echo "[2/5] Flashing radio (modem)..."
+fastboot flash radio radio-redfin-*.img 2>/dev/null || echo "  (no radio — OK for redfin)"
 
-echo "[3/4] Flashing boot..."
-fastboot flash boot boot.img
+echo "[3/5] (vbmeta skipped — using AVB disabled via build flag)..."
 
-echo "[4/4] Flashing system + vendor..."
+echo "[4/5] Flashing factory system.img + vendor.img..."
+fastboot flash vendor vendor.img
 fastboot flash system system.img
-fastboot flash vendor vendor-redfin-*.img
+
+echo "[5/5] Flashing custom boot.img (FART-modified ART)..."
+fastboot flash boot boot-aosp-fart.img
 
 echo ""
 echo "=========================================="
