@@ -61,9 +61,17 @@ jobs:
       - name: Repo sync
         run: |
           cd aosp
-          # -j$(nproc) on multi-core hosted runners can deadlock git/curl pipelines
-          # against google source mirrors under load. Cap concurrency to a safe level.
-          repo sync -c -j4 --no-tags --no-clone-bundle
+          # Add retry+timeout to each git operation. googlesource rate-limits
+          # hosted runners; without retries, a single throttled fetch stalls
+          # the whole sync indefinitely.
+          git config --global http.postBuffer 524288000
+          git config --global core.compression 0
+          git config --global http.lowSpeedLimit 1000
+          git config --global http.lowSpeedTime 600
+          # -j4 caps parallelism to avoid hammering mirrors. --no-tags + --depth=1
+          # already minimize fetches. --use-superproject enables the partial
+          # clone manifest from ANDROID 12+ that allows lazy checkout.
+          repo sync -c -j4 --no-tags --no-clone-bundle --use-superproject --retry-fetches=3
           echo "aosp synced: $(du -sh .repo | cut -f1) of manifest metadata"
 
   build:
