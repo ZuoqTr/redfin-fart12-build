@@ -109,6 +109,17 @@ jobs:
             libncurses5-dev x11proto-core-dev libx11-dev lib32z1-dev \
             libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig ccache \
             python3 python-is-python3 repo
+          # AOSP's prebuilt clang (clang-3289846/bin/clang.real) is dynamically linked
+          # against the SONAME libncurses.so.5. Ubuntu 22.04 ships libncurses6 by
+          # default; libncurses5-dev only pulls headers, not the runtime .so.5.
+          # Without this the renderscript bitcode compile step fails with:
+          #   "error while loading shared libraries: libncurses.so.5"
+          sudo apt-get install -y libncurses5 || \
+            (cd /tmp && \
+             curl -sLO http://archive.ubuntu.com/ubuntu/pool/universe/n/ncurses/libncurses5_6.3-2ubuntu0.1_amd64.deb && \
+             sudo dpkg -i libncurses5_6.3-2ubuntu0.1_amd64.deb && \
+             rm -f libncurses5_6.3-2ubuntu0.1_amd64.deb)
+          ldconfig -p | grep ncurses | head -5
 
       - name: Checkout repo (submodule access)
         uses: actions/checkout@v4
