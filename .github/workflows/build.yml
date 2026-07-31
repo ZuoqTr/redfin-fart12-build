@@ -218,9 +218,17 @@ jobs:
           ls -lh factory.zip
           unzip -q factory.zip -d factory
           ls factory/
-          INNER_ZIP=$(ls factory/image-redfin-sq1a.220205.002-*.zip | head -1)
+          # Inner zip layout: factory/<codename>-<buildid>/image-<codename>-<buildid>-<suffix>.zip
+          INNER_ZIP=$(find factory -maxdepth 3 -name 'image-redfin-*.zip' -print -quit)
           echo "INNER_ZIP=${INNER_ZIP}"
+          if [ -z "${INNER_ZIP}" ]; then
+            echo "ERROR: inner factory zip not found" >&2
+            exit 1
+          fi
+          rm -rf factory/extracted
+          mkdir -p factory/extracted
           unzip -q "${INNER_ZIP}" -d factory/extracted
+          ls -la factory/extracted/
           cp factory/extracted/system.img .
           cp factory/extracted/vendor.img .
           cp factory/extracted/bootloader-redfin-*.img .
