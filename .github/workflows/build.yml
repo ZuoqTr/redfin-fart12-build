@@ -29,7 +29,11 @@ jobs:
         run: |
           if ! sudo swapon --show | grep -q '/swapfile'; then
             if [ ! -f /swapfile ]; then
-              sudo fallocate -l 8G /swapfile
+              # fallocate sometimes creates a sparse file whose actual block usage
+              # is far less than the requested size; mkswap then reports the
+              # smaller size. Use dd with a real block device for a guaranteed
+              # 8GB file.
+              sudo dd if=/dev/zero of=/swapfile bs=1M count=8192 status=none
               sudo chmod 600 /swapfile
               sudo mkswap /swapfile
             fi
@@ -92,7 +96,11 @@ jobs:
         run: |
           if ! sudo swapon --show | grep -q '/swapfile'; then
             if [ ! -f /swapfile ]; then
-              sudo fallocate -l 8G /swapfile
+              # fallocate sometimes creates a sparse file whose actual block usage
+              # is far less than the requested size; mkswap then reports the
+              # smaller size. Use dd with a real block device for a guaranteed
+              # 8GB file.
+              sudo dd if=/dev/zero of=/swapfile bs=1M count=8192 status=none
               sudo chmod 600 /swapfile
               sudo mkswap /swapfile
             fi
@@ -195,10 +203,24 @@ jobs:
           # it (Pixel 5 kernel source is NOT public on android.googlesource.com; only
           # prebuilt .ko modules are under device/google/redbull-kernel).
           #
-          # `m systemimage` rebuilds the entire Android userland with our patches and
-          # produces a sparse system.img suitable for `fastboot flash system` in
-          # fastbootd. Build is ~30-60min on a 4-core hosted runner with ccache.
-          m -j$(nproc) systemimage 2>&1 | tee build.log
+          # Memory budget on the GitHub-hosted ubuntu-22.04 runner is ~15.6GB RAM
+          # + 8GB swap. AOSP soong-bootstrap warns "minimum required amount of
+          # free memory is around 16GB" at the start of every build, and ART/CC
+          # parallel compiles easily OOM-kill the runner (exit 143 = SIGTERM
+          # from the runner watchdog, NOT a clang error) within minutes of
+          # hitting the first big ninja edge. Mitigation:
+          #   -j$(($(nproc) / 2))     → cap concurrency at half the cores
+          #                              (2 jobs on the 4-core hosted runner).
+          #                              Peak per-job RSS halves → much less
+          #                              page-cache pressure on the 15.6GB box.
+          #   NINJA_STATUS / -k 0     → let ninja serialize gracefully instead of
+          #                              spawning 4 wide-link processes at once.
+          #   ANDROID_JAVA_HOME heap  → already set by envsetup, no change.
+          #
+          # Build takes ~30-60min on a 4-core hosted runner with ccache; with
+          # the -j cap expect 60-90min. Acceptable tradeoff vs OOM-rebooting
+          # every run.
+          m -j$(($(nproc) / 2)) systemimage 2>&1 | tee build.log
           echo "build exit: ${PIPESTATUS[0]}"
           SYS_SIZE=$(stat -c%s out/target/product/redfin/system.img 2>/dev/null || stat -f%z out/target/product/redfin/system.img)
           echo "system.img size: ${SYS_SIZE} bytes"
