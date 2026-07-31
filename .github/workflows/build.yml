@@ -167,52 +167,31 @@ jobs:
           lunch aosp_redfin-userdebug
           echo "lunch complete: TARGET_PRODUCT=${TARGET_PRODUCT} TARGET_BUILD_VARIANT=${TARGET_BUILD_VARIANT}"
 
-      - name: Clone redfin kernel sources
-        run: |
-          # Pixel 5 (redfin) kernel lives in a separate repo: kernel/google/redbull.
-          # The default `aosp_redfin-userdebug` lunch config points BUILD_KERNEL=true
-          # at this repo, but AOSP tree only fetches it via manifest groups when
-          # explicitly enabled. Clone it directly to satisfy the build.
-          mkdir -p aosp/kernel/google
-          if [ ! -d aosp/kernel/google/redbull/.git ]; then
-            git clone --depth=1 -b "${AOSP_TAG:-android-12.1.0_r2}" \
-              https://android.googlesource.com/kernel/google/redbull \
-              aosp/kernel/google/redbull
-          fi
-          ls aosp/kernel/google/redbull/
-
-      - name: Build kernel (redfin)
+      - name: Build system.img (FART-modified ART + framework + libcore)
         run: |
           cd aosp
           source build/envsetup.sh
           lunch aosp_redfin-userdebug
           set -o pipefail
-          # BUILD_KERNEL is auto-set by lunch aosp_redfin-userdebug. m here builds
-          # the kernel image (Image.lz4 + dtbo) and links it into the boot.img.
-          m -j$(nproc) redfin-kernel 2>&1 | tee kernel-build.log
-          KERNEL_EXIT=${PIPESTATUS[0]}
-          echo "kernel build exit: ${KERNEL_EXIT}"
-          if [ ! -f aosp/device/google/redbull-kernel/redbull/Image.lz4 ] && \
-             [ ! -f out/target/product/redfin/kernel ]; then
-            echo "ERROR: kernel build did not produce kernel image" >&2
-            exit 1
-          fi
-          echo "kernel size: $(ls -la out/target/product/redfin/kernel 2>/dev/null || echo 'no kernel file')"
-
-      - name: Build boot.img (ART + kernel + ramdisk)
-        run: |
-          cd aosp
-          source build/envsetup.sh
-          lunch aosp_redfin-userdebug
-          set -o pipefail
-          # bootimage now links the real redfin kernel into boot.img.
-          m -j$(nproc) bootimage 2>&1 | tee build.log
+          # fart12-lite modifies ONLY userland: libart.so, framework.jar, services.jar,
+          # boot.art, and DexFile.java. These all live under system.img on Android 12+.
+          # The kernel (vendor_boot.img + boot.img stub) is unmodified — we ship the
+          # factory kernel from the official redfin factory image instead of rebuilding
+          # it (Pixel 5 kernel source is NOT public on android.googlesource.com; only
+          # prebuilt .ko modules are under device/google/redbull-kernel).
+          #
+          # `m systemimage` rebuilds the entire Android userland with our patches and
+          # produces a sparse system.img suitable for `fastboot flash system` in
+          # fastbootd. Build is ~30-60min on a 4-core hosted runner with ccache.
+          m -j$(nproc) systemimage 2>&1 | tee build.log
           echo "build exit: ${PIPESTATUS[0]}"
-          BOOT_SIZE=$(stat -c%s out/target/product/redfin/boot.img 2>/dev/null || stat -f%z out/target/product/redfin/boot.img)
-          echo "boot.img size: ${BOOT_SIZE} bytes"
-          # Sanity-check: real redfin kernel + ramdisk is ~30MB+. Stub <5MB.
-          if [ "${BOOT_SIZE}" -lt 10000000 ]; then
-            echo "ERROR: boot.img suspiciously small (${BOOT_SIZE}B); kernel probably missing" >&2
+          SYS_SIZE=$(stat -c%s out/target/product/redfin/system.img 2>/dev/null || stat -f%z out/target/product/redfin/system.img)
+          echo "system.img size: ${SYS_SIZE} bytes"
+          # Sanity-check: aosp_redfin system.img should be > 500MB (843MB factory).
+          # AOSP-only build is smaller because it omits GMS/Verizon blobs, but still
+          # > 200MB. If it's tiny, the build didn't link any modules in.
+          if [ "${SYS_SIZE}" -lt 200000000 ]; then
+            echo "ERROR: system.img suspiciously small (${SYS_SIZE}B); userland build likely failed" >&2
             exit 1
           fi
 
@@ -225,12 +204,12 @@ jobs:
             aosp/out/soong/.bootstrap
           key: build-redfin-${{ github.sha }}
 
-      - name: Upload boot image
+      - name: Upload system image (FART-modified)
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: boot-image
-          path: aosp/out/target/product/redfin/boot.img
+          name: system-image
+          path: aosp/out/target/product/redfin/system.img
           if-no-files-found: error
           retention-days: 7
 
@@ -249,10 +228,10 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
-      - name: Download boot image
+      - name: Download system image (FART-modified)
         uses: actions/download-artifact@v4
         with:
-          name: boot-image
+          name: system-image
           path: images
 
       - name: Checkout repo (for templates + f1rt.config)
@@ -280,20 +259,32 @@ jobs:
           mkdir -p factory/extracted
           unzip -q "${INNER_ZIP}" -d factory/extracted
           ls -la factory/extracted/
-          cp factory/extracted/system.img .
+          # Keep FACTORY system.img/vendor_boot.img/boot.img/dtbo intact.
+          # FART only modifies userland under system.img; kernel + bootloader +
+          # modem + dtbo come from factory as-is.
+          cp factory/extracted/boot.img .
+          cp factory/extracted/vendor_boot.img .
           cp factory/extracted/vendor.img .
+          cp factory/extracted/dtbo.img .
           cp factory/extracted/bootloader-redfin-*.img .
           cp factory/extracted/radio-redfin-*.img 2>/dev/null || echo "no radio img (OK for redfin)"
+          cp factory/extracted/vbmeta.img .
           ls *.img
 
       - name: Stage bundle
         run: |
           mkdir -p bundle
-          cp images/boot.img bundle/boot-aosp-fart.img
-          cp system.img bundle/
+          # Custom: FART-modified system.img contains libart.so + framework.jar + boot.art
+          #         with cn.zskkk.FFaarrtt framework class and DexFile hooks.
+          cp images/system.img bundle/system-aosp-fart.img
+          # Factory: kernel lives in vendor_boot.img on Android 12+; boot.img is a stub.
+          cp boot.img bundle/
+          cp vendor_boot.img bundle/
           cp vendor.img bundle/
+          cp dtbo.img bundle/
           cp bootloader-redfin-*.img bundle/
           cp radio-redfin-*.img bundle/ 2>/dev/null || true
+          cp vbmeta.img bundle/
           cp f1rt.config bundle/
 
       - name: Generate flash-all.sh
@@ -335,8 +326,17 @@ jobs:
           tag_name: redfin-fart-${{ github.sha }}
           name: "Redfin FART12 build ${{ github.sha }}"
           body: |
-            AOSP 12.1.0_r2 userdebug boot.img with fart12-lite patches for Pixel 5 (redfin).
-            Bundle: custom boot.img + factory system.img + vendor.img + bootloader.img + radio.img.
+            AOSP 12.1.0_r2 userdebug system.img with fart12-lite patches for Pixel 5 (redfin).
+
+            Bundle contents:
+            - system-aosp-fart.img (CUSTOM — AOSP 12.1.0_r2 with FART12 ART/framework/libcore)
+            - boot.img, vendor_boot.img (FACTORY — kernel shipped as-is)
+            - vendor.img, dtbo.img (FACTORY)
+            - bootloader-redfin-*.img, radio-redfin-*.img (FACTORY)
+            - vbmeta.img (FACTORY — flash with --disable-verity --disable-verification)
+            - flash-all.sh (auto-generated by this build)
+            - f1rt.config (FART runtime config — push to /data/local/tmp/)
+
             Targets com.sacombankpay for DexProtector dump extraction.
             Build SHA: ${{ github.sha }}
             Build date: ${{ env.BUILD_DATE }}

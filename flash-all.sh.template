@@ -10,13 +10,13 @@ echo " Redfin FART12 build: ${BUILD_TAG}"
 echo " Build date: ${BUILD_DATE}"
 echo "=========================================="
 echo ""
-echo "This script flashes a Pixel 5 (redfin) with factory images + a custom"
-echo "boot.img containing fart12-lite (ART-based DexProtector dump support)"
-echo "targeting com.sacombankpay."
+echo "This script flashes a Pixel 5 (redfin) with:"
+echo "  - Factory stock kernel (boot.img + vendor_boot.img) — UNCHANGED"
+echo "  - Factory stock bootloader/radio/dtbo/vendor/vbmeta"
+echo "  - CUSTOM system.img containing AOSP 12.1.0_r2 userland with"
+echo "    fart12-lite patches (libart.so + framework.jar + boot.art + DexFile)"
 echo ""
-echo "boot.img was built from AOSP 12.1.0_r2 with fart12-lite patches."
-echo "system.img, vendor.img, bootloader.img, radio.img come from the official"
-echo "Google factory image and are unmodified."
+echo "Targets com.sacombankpay for DexProtector dump extraction."
 echo ""
 
 if ! command -v fastboot >/dev/null 2>&1; then
@@ -30,36 +30,49 @@ if [ -z "${DEVICE}" ]; then
   exit 1
 fi
 
-echo "[1/6] Flashing bootloader..."
+# Phase 1: bootloader-level partitions (vendor_boot, boot stub, dtbo)
+echo "[1/7] Flashing bootloader..."
 fastboot flash bootloader bootloader-redfin-*.img
 fastboot reboot-bootloader
 sleep 2
 
-echo "[2/6] Flashing radio (modem)..."
+echo "[2/7] Flashing radio (modem)..."
 fastboot flash radio radio-redfin-*.img 2>/dev/null || echo "  (no radio — OK for redfin)"
 
-echo "[3/6] (vbmeta skipped — using AVB disabled via build flag)..."
+# Disable AVB verification BEFORE flashing custom system.img, otherwise the
+# bootloader refuses to boot the (unsigned, FART-modified) userland.
+echo "[3/7] Disabling AVB (vbmeta --disable-verity --disable-verification)..."
+fastboot flash vbmeta --disable-verity --disable-verification vbmeta.img
 
-# Android 12+ uses dynamic partitions (super). system.img + vendor.img are
-# logical partitions under super; flashing them in bootloader mode fails with
-# "Partition should be flashed in fastbootd". Reboot into fastbootd first.
-echo "[4/6] Rebooting into fastbootd for dynamic partitions..."
+# Factory boot.img + vendor_boot.img: shipped unchanged. Pixel 5 kernel lives in
+# vendor_boot.img on Android 12+; boot.img is a small stub with the early-init
+# ramdisk. Re-flashing them is a no-op but doesn't hurt — keeps slots consistent.
+echo "[4/7] Flashing factory boot.img + vendor_boot.img + dtbo.img (unchanged)..."
+fastboot flash boot boot.img
+fastboot flash vendor_boot vendor_boot.img
+fastboot flash dtbo dtbo.img
+
+# Android 12+ uses dynamic partitions (super). system.img is a sparse image
+# under the super partition; flashing it requires fastbootd. Reboot first.
+echo "[5/7] Rebooting into fastbootd for dynamic partitions..."
 fastboot reboot fastboot
 sleep 3
 
-echo "[5/6] Flashing factory system.img + vendor.img (in fastbootd)..."
+echo "[6/7] Flashing factory vendor.img + custom FART system.img (in fastbootd)..."
 fastboot flash vendor vendor.img
-fastboot flash system system.img
+fastboot flash system system-aosp-fart.img
 
-echo "[6/6] Flashing custom boot.img (FART-modified ART)..."
-fastboot flash boot boot-aosp-fart.img
+# Boot the freshly-flashed image. `fastboot reboot` from fastbootd enters Android
+# (not fastbootd again).
+echo "[7/7] Rebooting into Android..."
+fastboot reboot
 
 echo ""
 echo "=========================================="
 echo " Flash complete."
 echo ""
 echo " Post-flash steps:"
-echo "  1. fastboot reboot"
+echo "  1. Wait ~60s for first boot (FART-modified ART is JIT/AOT-compiling)"
 echo "  2. adb push f1rt.config /data/local/tmp/f1rt.config"
 echo "  3. adb shell setprop persist.sys.usb.config mtp,adb"
 echo "  4. adb shell am start -n com.sacombankpay/.MainVer2Activity"
