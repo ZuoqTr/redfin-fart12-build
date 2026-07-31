@@ -134,13 +134,12 @@ jobs:
           path: |
             ~/.ccache
             aosp/out/soong/.bootstrap
-          # Cache key is based on the workflow file (not git SHA) so the same
-          # ccache + soong bootstrap survives across commits. Bump the version
-          # suffix to invalidate when the cache shape changes.
-          key: build-redfin-v3-${{ hashFiles('.github/workflows/build.yml', 'fart12-lite/art/runtime/art_method.cc', 'fart12-lite/frameworks/base/core/java/cn/zskkk/FFaarrtt.java', 'fart12-lite/libcore/dalvik/src/main/java/dalvik/system/DexFile.java') }}
+          # Primary key tied to the SHA: when the same commit builds twice it
+          # restores. Restore-keys provide a graceful fallback across commits
+          # (the old dc67e88 cache is 220MB of soong bootstrap + ccache that
+          # the next run can re-use even after a new commit).
+          key: build-redfin-${{ github.sha }}
           restore-keys: |
-            build-redfin-v3-
-            build-redfin-v2-
             build-redfin-
 
       - name: Copy fart12-lite files into AOSP tree
@@ -207,7 +206,7 @@ jobs:
           path: |
             ~/.ccache
             aosp/out/soong/.bootstrap
-          key: build-redfin-v3-${{ hashFiles('.github/workflows/build.yml', 'fart12-lite/art/runtime/art_method.cc', 'fart12-lite/frameworks/base/core/java/cn/zskkk/FFaarrtt.java', 'fart12-lite/libcore/dalvik/src/main/java/dalvik/system/DexFile.java') }}
+          key: build-redfin-${{ github.sha }}
 
       - name: Upload system image (FART-modified)
         if: success()
