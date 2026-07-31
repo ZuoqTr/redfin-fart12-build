@@ -30,21 +30,28 @@ if [ -z "${DEVICE}" ]; then
   exit 1
 fi
 
-echo "[1/5] Flashing bootloader..."
+echo "[1/6] Flashing bootloader..."
 fastboot flash bootloader bootloader-redfin-*.img
 fastboot reboot-bootloader
 sleep 2
 
-echo "[2/5] Flashing radio (modem)..."
+echo "[2/6] Flashing radio (modem)..."
 fastboot flash radio radio-redfin-*.img 2>/dev/null || echo "  (no radio — OK for redfin)"
 
-echo "[3/5] (vbmeta skipped — using AVB disabled via build flag)..."
+echo "[3/6] (vbmeta skipped — using AVB disabled via build flag)..."
 
-echo "[4/5] Flashing factory system.img + vendor.img..."
+# Android 12+ uses dynamic partitions (super). system.img + vendor.img are
+# logical partitions under super; flashing them in bootloader mode fails with
+# "Partition should be flashed in fastbootd". Reboot into fastbootd first.
+echo "[4/6] Rebooting into fastbootd for dynamic partitions..."
+fastboot reboot fastboot
+sleep 3
+
+echo "[5/6] Flashing factory system.img + vendor.img (in fastbootd)..."
 fastboot flash vendor vendor.img
 fastboot flash system system.img
 
-echo "[5/5] Flashing custom boot.img (FART-modified ART)..."
+echo "[6/6] Flashing custom boot.img (FART-modified ART)..."
 fastboot flash boot boot-aosp-fart.img
 
 echo ""
