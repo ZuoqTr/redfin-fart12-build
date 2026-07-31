@@ -134,8 +134,13 @@ jobs:
           path: |
             ~/.ccache
             aosp/out/soong/.bootstrap
-          key: build-redfin-${{ github.sha }}
+          # Cache key is based on the workflow file (not git SHA) so the same
+          # ccache + soong bootstrap survives across commits. Bump the version
+          # suffix to invalidate when the cache shape changes.
+          key: build-redfin-v3-${{ hashFiles('.github/workflows/build.yml', 'fart12-lite/art/runtime/art_method.cc', 'fart12-lite/frameworks/base/core/java/cn/zskkk/FFaarrtt.java', 'fart12-lite/libcore/dalvik/src/main/java/dalvik/system/DexFile.java') }}
           restore-keys: |
+            build-redfin-v3-
+            build-redfin-v2-
             build-redfin-
 
       - name: Copy fart12-lite files into AOSP tree
@@ -202,7 +207,7 @@ jobs:
           path: |
             ~/.ccache
             aosp/out/soong/.bootstrap
-          key: build-redfin-${{ github.sha }}
+          key: build-redfin-v3-${{ hashFiles('.github/workflows/build.yml', 'fart12-lite/art/runtime/art_method.cc', 'fart12-lite/frameworks/base/core/java/cn/zskkk/FFaarrtt.java', 'fart12-lite/libcore/dalvik/src/main/java/dalvik/system/DexFile.java') }}
 
       - name: Upload system image (FART-modified)
         if: success()
